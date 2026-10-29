@@ -158,29 +158,83 @@ function side21p3(a, b, c) {
     k = trips && flush ? "suited" : run && flush ? "sflush" : trips ? "trips" : run ? "straight" : flush ? "flush" : null;
   return k ? { name: SIDE_T3[k][0], odds: SIDE_T3[k][1] } : null;
 }
+const SIDE_DEF = [
+    { k: "pp", name: "Perfect Pairs", desc: "coppia nelle tue prime 2 carte \xB7 6 / 12 / 25 a 1" },
+    { k: "t3", name: "21+3", desc: "le tue 2 carte + quella del dealer \xB7 fino a 100 a 1" },
+    { k: "ll", name: "Lucky Ladies", desc: "le tue prime 2 carte fanno 20 \xB7 da 4 a 125 a 1" },
+    { k: "rm", name: "Royal Match", desc: "prime 2 carte dello stesso seme \xB7 5 a 2, K+Q 25 a 1" },
+    { k: "un", name: "Sotto 13", desc: "le prime 2 carte sommano meno di 13 \xB7 1 a 1" },
+    { k: "ov", name: "Sopra 13", desc: "le prime 2 carte sommano pi\xF9 di 13 \xB7 1 a 1" },
+    { k: "md", name: "Match the Dealer", desc: "una tua carta come quella del dealer \xB7 4 a 1 (9 a 1 stesso seme)" },
+    { k: "bu", name: "Buster", desc: "il dealer sballa \xB7 da 2 a 200 a 1, pi\xF9 carte usa" },
+  ],
+  SIDE_KEYS = SIDE_DEF.map((d) => d.k),
+  sideZero = () => Object.fromEntries(SIDE_KEYS.map((k) => [k, 0])),
+  sideSum = (sd) => SIDE_KEYS.reduce((n, k) => n + ((sd && sd[k]) || 0), 0),
+  sideLow = (c) => (c.r === "A" ? 1 : cardVal(c));
+function sideEval(k, c, up) {
+  const a = c[0],
+    b = c[1];
+  switch (k) {
+    case "pp":
+      return sidePP(a, b);
+    case "t3":
+      return side21p3(a, b, up);
+    case "ll": {
+      if (evalHand(c).total !== 20) return null;
+      if (a.r === "Q" && b.r === "Q" && a.s === b.s && a.s === SUITS[1]) return { name: "due dame di cuori", odds: 125 };
+      if (a.r === b.r && a.s === b.s) return { name: "20 identico", odds: 19 };
+      if (a.s === b.s) return { name: "20 dello stesso seme", odds: 10 };
+      return { name: "20", odds: 4 };
+    }
+    case "rm":
+      return a.s !== b.s
+        ? null
+        : (a.r === "K" && b.r === "Q") || (a.r === "Q" && b.r === "K")
+          ? { name: "re e regina dello stesso seme", odds: 25 }
+          : { name: "stesso seme", odds: 2.5 };
+    case "un":
+    case "ov": {
+      const t = sideLow(a) + sideLow(b);
+      return (k === "un" ? t < 13 : t > 13) ? { name: "totale " + t, odds: 1 } : null;
+    }
+    case "md": {
+      let o = 0;
+      for (const x of c) x.r === up.r && (o += x.s === up.s ? 9 : 4);
+      return o ? { name: o > 9 ? "due carte uguali" : "carta uguale", odds: o } : null;
+    }
+  }
+  return null;
+}
 function sideFit(sd, bet, spots, bank) {
-  let pp = Math.min(bet, (sd && sd.pp) || 0),
-    t3 = Math.min(bet, (sd && sd.t3) || 0);
-  const room = Math.floor(bank / Math.max(1, spots)) - bet;
-  if (!(room > 0)) return { pp: 0, t3: 0 };
-  return (pp + t3 > room && ((t3 = Math.min(t3, Math.max(0, room - pp))), pp + t3 > room && (pp = Math.max(0, room - t3))), { pp, t3 });
+  const r = sideZero();
+  let room = Math.floor(bank / Math.max(1, spots)) - bet;
+  if (!(room > 0)) return r;
+  for (const k of SIDE_KEYS) {
+    const v = Math.max(0, Math.min(bet, Math.floor(Number(sd && sd[k]) || 0), room));
+    ((r[k] = v), (room -= v));
+  }
+  return r;
 }
 function sideResolve(label, cards, up, sd) {
   let credit = 0;
   const parts = [];
-  if (sd.pp) {
-    const r = sidePP(cards[0], cards[1]);
+  for (const d of SIDE_DEF) {
+    if (!sd[d.k] || d.k === "bu") continue;
+    const r = sideEval(d.k, cards, up);
     r
-      ? ((credit += sd.pp * (r.odds + 1)), parts.push(`Perfect Pairs: ${r.name} ${money(sd.pp * r.odds, !0)}`))
-      : parts.push(`Perfect Pairs: niente ${money(-sd.pp, !0)}`);
+      ? ((credit += sd[d.k] * (r.odds + 1)), parts.push(`${d.name}: ${r.name} ${money(sd[d.k] * r.odds, !0)}`))
+      : parts.push(`${d.name}: niente ${money(-sd[d.k], !0)}`);
   }
-  if (sd.t3) {
-    const r = side21p3(cards[0], cards[1], up);
-    r
-      ? ((credit += sd.t3 * (r.odds + 1)), parts.push(`21+3: ${r.name} ${money(sd.t3 * r.odds, !0)}`))
-      : parts.push(`21+3: niente ${money(-sd.t3, !0)}`);
+  return { credit, net: credit - sideSum(sd), txt: parts.length ? (label ? label + " \u2192 " : "") + parts.join(" \xB7 ") : "" };
+}
+function busterPay(stake) {
+  const n = S.dealer.cards.length;
+  if (evalHand(S.dealer.cards).total > 21) {
+    const o = n >= 8 ? 200 : { 3: 2, 4: 4, 5: 9, 6: 20, 7: 50 }[n] || 2;
+    return { credit: stake * (o + 1), txt: `Buster: il dealer sballa con ${n} carte ${money(stake * o, !0)}` };
   }
-  return { credit, net: credit - sd.pp - sd.t3, txt: (label ? label + " \u2192 " : "") + parts.join(" \xB7 ") };
+  return { credit: 0, txt: `Buster: niente ${money(-stake, !0)}` };
 }
 async function sideSettle() {
   const sd = S.side;
@@ -189,9 +243,9 @@ async function sideSettle() {
   for (const m of S.seats) {
     if (!m.me) continue;
     const r = sideResolve(S.sel.length > 1 ? `Posto ${m.pos}` : "", m.hands[0].cards, S.dealer.cards[0], sd);
-    ((S.bank += r.credit), (net += r.net), txt.push(r.txt));
+    ((S.bank += r.credit), (net += r.net), r.txt && txt.push(r.txt));
   }
-  ((S.sideNet = net), (S.sideTxt = txt.join(" | ")), (S.msg = S.sideTxt), UI.render(), await pause("bot"));
+  ((S.sideNet = net), (S.sideTxt = txt.join(" | ")), S.sideTxt && ((S.msg = S.sideTxt), UI.render(), await pause("bot")));
 }
 function createSession(e) {
   const t = e.decks,
@@ -223,7 +277,7 @@ function createSession(e) {
       shuffles: 0,
       bank: e.cash,
       startBank: e.cash,
-      side: { pp: 0, t3: 0 },
+      side: sideZero(),
       sideNet: 0,
       sideTxt: "",
       bet: e.minBet,
@@ -374,14 +428,13 @@ async function playHand(e, t) {
     return;
   }
   for (; !t.done;) {
-    if (evalHand(t.cards).total >= 21 || (t.splitAce && t.cards.length >= 2)) {
+    if (evalHand(t.cards).total >= 21) {
       t.done = !0;
       break;
     }
     const n = t.cards.length === 2 && (!e.me || S.bank >= t.bet),
       o =
         t.cards.length === 2 &&
-        !t.splitAce &&
         e.hands.length < 4 &&
         cardVal(t.cards[0]) === cardVal(t.cards[1]) &&
         (!e.me || S.bank >= t.bet);
@@ -405,8 +458,7 @@ async function playHand(e, t) {
         e.hands.splice(e.hands.indexOf(t) + 1, 0, l),
         UI.render(),
         await pause("deal"),
-        await giveCard(t),
-        t.splitAce && ((S.msg = "Assi divisi: una sola carta per mano, poi si sta."), UI.render(), await pause("bot")));
+        await giveCard(t));
     }
   }
   UI.render();
@@ -427,6 +479,11 @@ function settle() {
   const e = evalHand(S.dealer.cards),
     t = S.dealer.cards.length === 2 && e.total === 21,
     a = e.total > 21;
+  const stake = S.cfg.side === "on" && S.side ? (S.side.bu || 0) * S.sel.length : 0;
+  if (stake) {
+    const r = busterPay(stake);
+    ((S.bank += r.credit), (S.sideNet = (S.sideNet || 0) + r.credit), (S.sideTxt = (S.sideTxt ? S.sideTxt + " | " : "") + r.txt));
+  }
   let s = S.sideNet || 0;
   for (const n of S.seats)
     for (const o of n.hands) {
@@ -479,8 +536,8 @@ async function playRound() {
     (S.msg = "Si distribuiscono le carte\u2026"));
   const e = S.bet,
     t = S.sel.length,
-    sd = S.cfg.side === "on" ? sideFit(S.side, e, t, S.bank) : { pp: 0, t3: 0 },
-    sideTot = (sd.pp + sd.t3) * t;
+    sd = S.cfg.side === "on" ? sideFit(S.side, e, t, S.bank) : sideZero(),
+    sideTot = sideSum(sd) * t;
   ((S.side = sd), (S.bank -= e * t + sideTot), (S.lastBet = e));
   for (const s of S.seats) s.hands = [newHand(s.me ? e : botBet())];
   ((S.dealer.cards = []), UI.render(), await pause("deal"));
@@ -552,7 +609,7 @@ async function runSession(e) {
           (S.notice = S.notice || "Fiches insufficienti: giochi un posto in meno."));
       }
       ((S.bet = Math.min(Math.max(S.lastBet, t), Math.floor(S.bank / S.sel.length))),
-        (S.side = S.cfg.side === "on" ? sideFit(S.side, S.bet, S.sel.length, S.bank) : { pp: 0, t3: 0 }),
+        (S.side = S.cfg.side === "on" ? sideFit(S.side, S.bet, S.sel.length, S.bank) : sideZero()),
         (S.msg = S.notice || "Fai la tua puntata."),
         await ask("bet"),
         (S.notice = ""));
@@ -835,14 +892,13 @@ async function roomPlayHand(e, t) {
     return;
   }
   for (; !t.done;) {
-    if (evalHand(t.cards).total >= 21 || (t.splitAce && t.cards.length >= 2)) {
+    if (evalHand(t.cards).total >= 21) {
       t.done = !0;
       break;
     }
     const s = t.cards.length === 2 && e.bank >= t.bet,
       n =
         t.cards.length === 2 &&
-        !t.splitAce &&
         e.hands.length < 4 &&
         cardVal(t.cards[0]) === cardVal(t.cards[1]) &&
         e.bank >= t.bet,
@@ -864,8 +920,7 @@ async function roomPlayHand(e, t) {
         e.hands.splice(e.hands.indexOf(t) + 1, 0, r),
         UI.render(),
         await pause("deal"),
-        await giveCard(t),
-        t.splitAce && ((S.msg = "Assi divisi: una sola carta per mano, poi si sta."), UI.render(), await pause("bot")));
+        await giveCard(t));
     }
   }
   UI.render();
@@ -876,6 +931,10 @@ function roomSettle() {
     a = e.total > 21;
   for (const s of S.seats) {
     let n = s.left ? 0 : s.sideNet || 0;
+    if (!s.left && s.sd && s.sd.bu) {
+      const r = busterPay(s.sd.bu);
+      ((s.bank += r.credit), (n += r.credit), (s.sideNet = (s.sideNet || 0) + r.credit), (s.sideTxt = (s.sideTxt ? s.sideTxt + " | " : "") + r.txt));
+    }
     for (const o of s.hands) {
       const i = evalHand(o.cards),
         r = isNatural(o);
@@ -910,8 +969,8 @@ async function roomRound(e) {
   const t = S.cfg.minBet;
   ((S.phase = "dealing"), (S.turn = null), (S.dealerBJ = !1), (S.msg = "Si distribuiscono le carte\u2026"));
   for (const s of e) {
-    const sd = S.cfg.side === "on" ? sideFit(s.sideReq, s.bet, 1, s.bank) : { pp: 0, t3: 0 };
-    ((s.sd = sd), (s.sideNet = 0), (s.sideTxt = ""), (s.bank -= sd.pp + sd.t3));
+    const sd = S.cfg.side === "on" ? sideFit(s.sideReq, s.bet, 1, s.bank) : sideZero();
+    ((s.sd = sd), (s.sideNet = 0), (s.sideTxt = ""), (s.bank -= sideSum(sd)));
   }
   for (const s of e)
     ((s.bank -= s.bet),
@@ -926,9 +985,9 @@ async function roomRound(e) {
     await dealerCard(s === 0);
   }
   const a = S.dealer.cards[0];
-  if (e.some((s) => s.sd.pp + s.sd.t3 > 0)) {
+  if (e.some((s) => sideSum(s.sd) > 0)) {
     for (const s of e) {
-      if (!(s.sd.pp + s.sd.t3)) continue;
+      if (!sideSum(s.sd)) continue;
       const r = sideResolve("", s.hands[0].cards, a, s.sd);
       ((s.bank += r.credit), (s.sideNet = r.net), (s.sideTxt = r.txt));
     }
@@ -1013,18 +1072,20 @@ async function runRoom() {
               res = await rask(
                 n,
                 "bet",
-                { min: t, max: o, last: i, side: sideOn, sideLast: n.sideReq || { pp: 0, t3: 0 } },
-                { b: i, pp: 0, t3: 0 },
+                { min: t, max: o, last: i, side: sideOn, sideLast: n.sideReq || sideZero() },
+                Object.assign({ b: i }, sideZero()),
                 (r) => {
                   const q = r && typeof r == "object" ? r : { b: r };
                   let l = Number(q.b);
                   Number.isFinite(l) || (l = i);
                   const b = Math.max(t, Math.min(o, Math.floor(l))),
                     f = (x) => (sideOn ? Math.max(0, Math.min(b, Math.floor(Number(x) || 0))) : 0);
-                  return { b, pp: f(q.pp), t3: f(q.t3) };
+                  const out = { b };
+                  for (const k of SIDE_KEYS) out[k] = f(q[k]);
+                  return out;
                 },
               );
-            ((n.bet = res.b), (n.sideReq = { pp: res.pp, t3: res.t3 }), UI.render());
+            ((n.bet = res.b), (n.sideReq = Object.fromEntries(SIDE_KEYS.map((k) => [k, res[k] || 0]))), UI.render());
           }),
         ),
         (S.notice = ""),
@@ -3873,7 +3934,8 @@ function buildSetup() {
       <div class="joinrow"><input id="in-code" class="txt code-in" maxlength="5" autocapitalize="characters" autocomplete="off" spellcheck="false" placeholder="CODICE" aria-label="Codice stanza"><button type="button" class="primary" data-act="room-join">Entra</button></div>
       <div class="err" id="room-err" role="alert"></div></section>
     <section class="panel"><h2>Side bet</h2>${seg("side")}
-      <p class="note" id="note-side"></p></section>
+      <p class="note" id="note-side"></p>
+      <details style="margin-top:10px"><summary>Cosa sono le side bet? Cos'\xE8 il 21+3?</summary><div class="sb-explain">${SIDE_HELP}</div></details></section>
     <section class="panel"><h2>Ritmo delle carte</h2>${seg("speed")}</section>
     <section class="panel"><h2>Aiuti per imparare</h2>
       <p class="lbl">Conteggio a vista (running e true count)</p>${seg("showCount")}
@@ -3884,12 +3946,10 @@ function buildSetup() {
       <li>Blackjack paga 3 a 2.</li>
       <li>Il dealer sta su tutti i 17, anche soft.</li>
       <li>Raddoppio su due carte, anche dopo lo split.</li>
-      <li>Split di carte dello stesso valore, fino a 4 mani. Gli assi si dividono una volta sola e prendono una carta ciascuno.</li>
+      <li>Split di carte dello stesso valore, fino a 4 mani. Anche dopo lo split degli assi puoi chiedere carta, raddoppiare o dividere ancora. Un 21 dopo lo split paga 1 a 1, non come blackjack.</li>
       <li>Assicurazione 2 a 1 con asso del dealer. Con asso o dieci scoperti il dealer controlla la carta coperta.</li>
       <li>Nessuna resa. Carta di taglio al 75% del sabot (50% con 1 mazzo).</li>
-      <li>Side bet (se attive), pagate subito dopo la distribuzione, per ogni posto:
-        <b>Perfect Pairs</b> sulle tue prime due carte: coppia mista 6 a 1, colorata 12 a 1, perfetta 25 a 1.
-        <b>21+3</b> con le tue due carte e quella scoperta del dealer: colore 5 a 1, scala 10 a 1, tris 30 a 1, scala colore 40 a 1, tris colorato 100 a 1.</li>
+      <li>Side bet (se attive), da \u20AC1 in su: Perfect Pairs, 21+3, Lucky Ladies, Royal Match, Sotto/Sopra 13, Match the Dealer e Buster. Si pagano subito dopo la distribuzione, tranne Buster che si paga a fine mano. Tabelle di pagamento nella spiegazione delle side bet.</li>
     </ul></details>`;
 }
 function syncSetup() {
@@ -3921,7 +3981,7 @@ function syncSetup() {
         : "Pi\xF9 mazzi ci sono, pi\xF9 il conteggio va diviso per i mazzi rimasti (true count)."),
     ($("#note-side").textContent =
       cfg.side === "on"
-        ? "Prima di ogni mano puoi puntare anche su Perfect Pairs (coppia nelle tue prime due carte) e 21+3 (le tue due carte pi\xF9 quella del dealer). Sono facoltative e hanno un vantaggio del banco pi\xF9 alto: il conteggio non le aiuta."
+        ? "Prima di ogni mano puoi puntare anche su Perfect Pairs, 21+3, Lucky Ladies, Royal Match, Sotto/Sopra 13, Match the Dealer e Buster, da \u20AC1 in su. Sono facoltative e hanno un vantaggio del banco pi\xF9 alto: il conteggio non le aiuta."
         : "Solo il blackjack classico, senza puntate accessorie."),
     ($("#note-entry").textContent =
       cfg.entry === "fresh"
@@ -4154,11 +4214,11 @@ function renderDock() {
       c = Math.max(t, Math.min(o, Math.round(t * Math.max(1, Math.min(8, l - 0)))));
     const step = Math.max(1, Math.floor(t / 2)),
       sdRow = (k, name, desc) => {
-        const v = V.side[k];
-        return `<div class="sbrow"><div><b>${name}</b><small>${desc}</small></div><div class="mini-stepper"><button type="button" data-act="side" data-k="${k}" data-d="-1" ${v > 0 ? "" : "disabled"} aria-label="Meno ${name}">\u2212</button><b>${money(v)}</b><button type="button" data-act="side" data-k="${k}" data-d="1" ${v < V.bet && (V.bet + sdT + step) * n <= V.bank ? "" : "disabled"} aria-label="Pi\xF9 ${name}">+</button></div></div>`;
+        const v = V.side[k] || 0;
+        return `<div class="sbrow"><div><b>${name}</b><small>${desc}</small></div><div class="mini-stepper"><button type="button" data-act="side" data-k="${k}" data-d="-1" ${v > 0 ? "" : "disabled"} aria-label="Meno ${name}">\u2212</button><b>${money(v)}</b><button type="button" data-act="side" data-k="${k}" data-d="1" ${v < V.bet && (V.bet + sdT + sideStep(v, 1)) * n <= V.bank ? "" : "disabled"} aria-label="Pi\xF9 ${name}">+</button></div></div>`;
       },
       sdHtml = sdOn
-        ? `<div class="sidebets"><div class="sb-title">Side bet <small>facoltative${n > 1 ? " \xB7 per ogni posto" : ""}</small></div>${sdRow("pp", "Perfect Pairs", "coppia nelle tue prime 2 carte \xB7 6 / 12 / 25 a 1")}${sdRow("t3", "21+3", "le tue 2 carte + quella del dealer \xB7 fino a 100 a 1")}${cfg.hint === "on" ? '<p class="sugline">Consiglio: le side bet rendono meno del gioco base e il conteggio Hi-Lo non le aiuta. Se vuoi allenarti a contare, lasciale a zero.</p>' : ""}</div>`
+        ? `<div class="sidebets"><div class="sb-title">Side bet <small>facoltative${n > 1 ? " \xB7 per ogni posto" : ""}</small><button type="button" class="sb-help" data-act="side-help" aria-expanded="${sideHelpOpen}">${sideHelpOpen ? "Chiudi" : "Come funzionano?"}</button></div>${sideHelpOpen ? `<div class="sb-explain">${SIDE_HELP}</div>` : ""}${SIDE_DEF.map((d) => sdRow(d.k, d.name, d.desc)).join("")}${cfg.hint === "on" ? '<p class="sugline">Consiglio: le side bet rendono meno del gioco base e il conteggio Hi-Lo non le aiuta. Se vuoi allenarti a contare, lasciale a zero.</p>' : ""}</div>`
         : "";
     s = `${cfg.hint === "on" ? `<p class="sugline">Consiglio: <b>${money(c)}</b> \u2014 true count ${fmtTC(l)}${l < 2 ? ": tieni la puntata minima" : ": il mazzo ti favorisce, puoi alzare"}.</p>` : ""}<div class="bet-row">${i}</div>${sdHtml}
     <div class="bet-tools">
@@ -4281,14 +4341,24 @@ function showResult(e) {
 function rememberSeats() {
   ((cfg.spots = S.sel.length), (cfg.seatPref = S.sel.slice()), saveCfg());
 }
+const SIDE_HELP = `<p><b>Cosa sono.</b> Sono puntate extra, facoltative e separate dalla mano. Si decidono prima di distribuire e vincono o perdono per conto loro. Puoi puntare anche solo \u20AC1 su ognuna (non oltre la puntata principale). Tutte si pagano subito dopo le prime carte, tranne Buster che si paga a fine mano.</p>
+<p><b>Perfect Pairs.</b> Le tue prime due carte sono una coppia (stesso valore, ad esempio due 7).<br>\u2022 Mista (colori diversi, es. 7\u2660 e 7\u2665): 6 a 1<br>\u2022 Colorata (stesso colore, seme diverso, es. 7\u2665 e 7\u2666): 12 a 1<br>\u2022 Perfetta (stesso seme, solo con pi\xF9 mazzi): 25 a 1</p>
+<p><b>21+3.</b> Blackjack (21) + poker a 3 carte: si usano le tue due carte pi\xF9 quella scoperta del dealer, come una mano di poker.<br>\u2022 Colore (3 carte dello stesso seme): 5 a 1<br>\u2022 Scala (3 valori consecutivi, anche A-2-3 o Q-K-A): 10 a 1<br>\u2022 Tris (3 carte uguali): 30 a 1<br>\u2022 Scala colore: 40 a 1<br>\u2022 Tris colorato (identiche, stesso seme): 100 a 1<br>Esempio: hai 5\u2665 e 9\u2665, il dealer mostra K\u2665: tre cuori = colore, vinci 5 volte la puntata.</p>
+<p><b>Lucky Ladies.</b> Le tue prime due carte fanno 20. Un 20 qualsiasi paga 4 a 1, dello stesso seme 10 a 1, due carte identiche 19 a 1, due dame di cuori 125 a 1.</p>
+<p><b>Royal Match.</b> Le tue prime due carte sono dello stesso seme: 5 a 2. Re e regina dello stesso seme: 25 a 1.</p>
+<p><b>Sotto 13 / Sopra 13.</b> Scommetti che il totale delle prime due carte (asso = 1) sia sotto o sopra 13. Il 13 esatto perde per entrambe. Paga 1 a 1.</p>
+<p><b>Match the Dealer.</b> Una delle tue prime due carte ha lo stesso valore di quella scoperta del dealer: 4 a 1, se anche il seme \xE8 uguale 9 a 1. Se lo hanno entrambe le carte i premi si sommano.</p>
+<p><b>Buster.</b> Scommetti che il dealer sballi. Pi\xF9 carte ha usato per sballare, pi\xF9 paga: 3 carte 2 a 1, 4 carte 4 a 1, 5 carte 9 a 1, 6 carte 20 a 1, 7 carte 50 a 1, 8 o pi\xF9 200 a 1.</p>
+<p><b>Conviene?</b> \xC8 fortuna pura, con vantaggio del banco pi\xF9 alto del blackjack, e il conteggio Hi-Lo non aiuta. Se ti alleni a contare, lasciale a zero.</p>`;
+let sideHelpOpen = !1;
 const sideOnV = (t) => t.cfg.side === !0 || t.cfg.side === "on",
-  sideTotal = (t) => (sideOnV(t) && t.side ? t.side.pp + t.side.t3 : 0);
+  sideTotal = (t) => (sideOnV(t) && t.side ? sideSum(t.side) : 0),
+  sideStep = (v, d) => (d > 0 ? (v < 10 ? 1 : 5) : v <= 10 ? 1 : 5);
 function adjustSide(k, d) {
   const t = ROOM_UI ? V : S,
     n = Math.max(1, t.sel.length),
-    step = Math.max(1, Math.floor(t.cfg.minBet / 2)),
-    cur = t.side[k];
-  let v = cur + d * step;
+    cur = t.side[k] || 0;
+  let v = cur + d * sideStep(cur, d);
   (v = Math.max(0, Math.min(t.bet, v)),
     d > 0 && (t.bet + sideTotal(t) - cur + v) * n > t.bank && (v = cur),
     (t.side[k] = v),
@@ -4342,6 +4412,9 @@ function adjustBet(e) {
       break;
     case "bet":
       n && n.kind === "bet" && adjustBet(t.dataset.d);
+      break;
+    case "side-help":
+      ((sideHelpOpen = !sideHelpOpen), render());
       break;
     case "side":
       n && n.kind === "bet" && adjustSide(t.dataset.k, Number(t.dataset.d));
@@ -4629,7 +4702,7 @@ function roomState(e) {
   const t = e.ask;
   (t
     ? (!RM.pending || RM.pending.id !== t.id) &&
-      (t.kind === "bet" && ((RM.bet = t.opts.last), (RM.side = Object.assign({ pp: 0, t3: 0 }, t.opts.sideLast))),
+      (t.kind === "bet" && ((RM.bet = t.opts.last), (RM.side = Object.assign(sideZero(), t.opts.sideLast))),
       (RM.pending = {
         id: t.id,
         kind: t.kind,
@@ -4638,7 +4711,7 @@ function roomState(e) {
           !RM ||
             !RM.pending ||
             RM.pending.id !== t.id ||
-            (t.kind === "bet" && a === void 0 && (a = { b: RM.bet, pp: RM.side.pp, t3: RM.side.t3 }),
+            (t.kind === "bet" && a === void 0 && (a = Object.assign({ b: RM.bet }, RM.side)),
             (RM.pending = null),
             V && ((V.pending = null), paint()),
             RM.send({ t: "ans", id: t.id, v: a }));
@@ -4678,7 +4751,7 @@ function buildView(e) {
       tableSeats: TABLE_SEATS,
       sel: a ? [a.pos] : [],
       cfg: { minBet: e.minBet, decks: e.decks, askCount: e.askCount, side: !!(e.cfg && e.cfg.side) },
-      side: RM.side || { pp: 0, t3: 0 },
+      side: RM.side || sideZero(),
       decks: e.decks,
       total: e.total,
       used: e.used,
@@ -7730,3 +7803,20 @@ for (const sel of ["#bk-hand", "#sk-hand", "#bx-hand", "#pk-me"]) {
       t && fanify(t);
     }).observe(el, { childList: true });
 }
+
+/* ---------- Nome giocatore: si imposta una volta sola in Home ---------- */
+(function () {
+  const ids = ["in-name", "pk-in-name", "bk-in-name", "sk-in-name", "bx-in-name"],
+    home = $("#home-name"),
+    apply = (v) => {
+      ((cfg.name = v), (pkCfg().name = v), (bkCfg().name = v), (skCfg().name = v), (bxCfg().name = v), saveCfg());
+      for (const i of ids) $("#" + i) && ($("#" + i).value = v);
+    };
+  for (const i of ids) {
+    const l = $("#" + i) && $("#" + i).closest("label");
+    l && (l.hidden = !0);
+  }
+  home.value = cfg.name || pkCfg().name || bkCfg().name || skCfg().name || bxCfg().name || "";
+  apply(home.value);
+  home.addEventListener("input", () => apply(home.value.slice(0, 14).trim()));
+})();

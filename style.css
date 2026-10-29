@@ -2534,3 +2534,30 @@ strong.bx-lives {
     font-size: 34px;
   }
 }
+.sb-title {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.sb-help {
+  margin-left: auto;
+  min-height: 32px;
+  font-size: 12px;
+  padding: 0 10px;
+  border-radius: 999px;
+}
+.sb-explain {
+  font-size: 13px;
+  line-height: 1.45;
+  color: var(--text);
+  margin: 6px 0 10px;
+  display: grid;
+  gap: 8px;
+}
+.sb-explain p {
+  margin: 0;
+}
+.homename {
+  margin-bottom: 14px;
+}

@@ -15,7 +15,7 @@ Sul computer l'app si apre al centro dello schermo in una colonna più larga; su
 
 | Gioco | Giocatori | Note |
 |---|---|---|
-| **Blackjack Hi-Lo** | solo, con bot o amici (fino a 7 posti) | Allenati a contare le carte. Fiches 1/5/10/25/50/100/500, puntata libera sopra il minimo. Side bet facoltative: Perfect Pairs e 21+3. Gli assi divisi ricevono una sola carta. |
+| **Blackjack Hi-Lo** | solo, con bot o amici (fino a 7 posti) | Allenati a contare le carte. Fiches 1/5/10/25/50/100/500, puntata libera sopra il minimo. Side bet facoltative: Perfect Pairs e 21+3. Dopo lo split degli assi puoi continuare a chiedere carta. |
 | **Poker Texas Hold'em** | bot o amici | No limit, blinds a scelta, legenda delle mani e probabilità. |
 | **Briscola** | 2, 3 o 4 (a coppie) | Carte napoletane (40 carte). |
 | **Scopa** | 2, 3 o 4 (a coppie) | Carte napoletane. Scope, settebello, primiera; a 11 o 21 punti. |
