@@ -2637,3 +2637,18 @@ strong.bx-lives {
   overflow-y: auto;
   overscroll-behavior: contain;
 }
+
+/* scrollbar a sinistra: piu' facile premere il + */
+.sb-list,
+.dock {
+  direction: rtl;
+}
+.sb-list > *,
+.dock > * {
+  direction: ltr;
+}
+.sb-list > .sb-close {
+  display: block;
+  width: 100%;
+  margin: 8px 0 2px;
+}

@@ -4252,9 +4252,9 @@ function renderDock() {
         return `<div class="sbrow"><div><b>${name}</b><small>${desc}</small></div><div class="mini-stepper"><button type="button" data-act="side" data-k="${k}" data-d="-1" ${v > 0 ? "" : "disabled"} aria-label="Meno ${name}">\u2212</button><b>${money(v)}</b><button type="button" data-act="side" data-k="${k}" data-d="1" ${v < V.bet && (V.bet + sdT + sideStep(v, 1)) * n <= V.bank ? "" : "disabled"} aria-label="Pi\xF9 ${name}">+</button></div></div>`;
       },
       sdHtml = sdOn
-        ? `<div class="sidebets"><div class="sb-title">Side bet <small>${sdT ? money(sdT) + (n > 1 ? " per posto" : "") + " puntati" : "facoltative"}</small><button type="button" class="sb-help" data-act="side-open" aria-expanded="${sideListOpen}">${sideListOpen ? "Chiudi" : sdT ? "Modifica" : "Scegli"}</button></div>${
+        ? `<div class="sidebets"><div class="sb-title">Side bet <small>${sdT ? money(sdT) + (n > 1 ? " per posto" : "") + " puntati" : "facoltative"}</small><button type="button" class="sb-help" data-act="side-open" aria-expanded="${sideListOpen}">${sideListOpen ? "Abbassa ▾" : sdT ? "Modifica" : "Scegli"}</button></div>${
             sideListOpen
-              ? `<div class="sb-list"><button type="button" class="sb-help" data-act="side-help" aria-expanded="${sideHelpOpen}">${sideHelpOpen ? "Nascondi spiegazione" : "Come funzionano?"}</button>${sideHelpOpen ? `<div class="sb-explain">${SIDE_HELP}</div>` : ""}${SIDE_DEF.map((d) => sdRow(d.k, d.name, d.desc)).join("")}${cfg.hint === "on" ? '<p class="sugline">Consiglio: le side bet rendono meno del gioco base e il conteggio Hi-Lo non le aiuta. Se vuoi allenarti a contare, lasciale a zero.</p>' : ""}</div>`
+              ? `<div class="sb-list"><button type="button" class="sb-help" data-act="side-help" aria-expanded="${sideHelpOpen}">${sideHelpOpen ? "Nascondi spiegazione" : "Come funzionano?"}</button>${sideHelpOpen ? `<div class="sb-explain">${SIDE_HELP}</div>` : ""}${SIDE_DEF.map((d) => sdRow(d.k, d.name, d.desc)).join("")}${cfg.hint === "on" ? '<p class="sugline">Consiglio: le side bet rendono meno del gioco base e il conteggio Hi-Lo non le aiuta. Se vuoi allenarti a contare, lasciale a zero.</p>' : ""}<button type="button" class="sb-help sb-close" data-act="side-open">Abbassa il menu ▾</button></div>`
               : ""
           }</div>`
         : "";
