@@ -218,23 +218,35 @@ function sideFit(sd, bet, spots, bank) {
 }
 function sideResolve(label, cards, up, sd) {
   let credit = 0;
-  const parts = [];
+  const parts = [],
+    lines = [];
   for (const d of SIDE_DEF) {
     if (!sd[d.k] || d.k === "bu") continue;
     const r = sideEval(d.k, cards, up);
     r
-      ? ((credit += sd[d.k] * (r.odds + 1)), parts.push(`${d.name}: ${r.name} ${money(sd[d.k] * r.odds, !0)}`))
-      : parts.push(`${d.name}: niente ${money(-sd[d.k], !0)}`);
+      ? ((credit += sd[d.k] * (r.odds + 1)),
+        parts.push(`${d.name}: ${r.name} ${money(sd[d.k] * r.odds, !0)}`),
+        lines.push({ name: d.name, txt: r.name, net: sd[d.k] * r.odds }))
+      : (parts.push(`${d.name}: niente ${money(-sd[d.k], !0)}`), lines.push({ name: d.name, txt: "niente", net: -sd[d.k] }));
   }
-  return { credit, net: credit - sideSum(sd), txt: parts.length ? (label ? label + " \u2192 " : "") + parts.join(" \xB7 ") : "" };
+  return {
+    credit,
+    net: credit - sideSum(sd),
+    lines,
+    txt: parts.length ? (label ? label + " \u2192 " : "") + parts.join(" \xB7 ") : "",
+  };
 }
 function busterPay(stake) {
   const n = S.dealer.cards.length;
   if (evalHand(S.dealer.cards).total > 21) {
     const o = n >= 8 ? 200 : { 3: 2, 4: 4, 5: 9, 6: 20, 7: 50 }[n] || 2;
-    return { credit: stake * (o + 1), txt: `Buster: il dealer sballa con ${n} carte ${money(stake * o, !0)}` };
+    return {
+      credit: stake * (o + 1),
+      txt: `Buster: il dealer sballa con ${n} carte ${money(stake * o, !0)}`,
+      line: { name: "Buster", txt: `dealer sballa con ${n} carte`, net: stake * o },
+    };
   }
-  return { credit: 0, txt: `Buster: niente ${money(-stake, !0)}` };
+  return { credit: 0, txt: `Buster: niente ${money(-stake, !0)}`, line: { name: "Buster", txt: "il dealer non sballa", net: -stake } };
 }
 async function sideSettle() {
   const sd = S.side;
@@ -244,6 +256,10 @@ async function sideSettle() {
     if (!m.me) continue;
     const r = sideResolve(S.sel.length > 1 ? `Posto ${m.pos}` : "", m.hands[0].cards, S.dealer.cards[0], sd);
     ((S.bank += r.credit), (net += r.net), r.txt && txt.push(r.txt));
+    for (const l of r.lines) {
+      const o = S.sideLines.find((x) => x.name === l.name);
+      o ? (o.net += l.net) : S.sideLines.push(Object.assign({}, l));
+    }
   }
   ((S.sideNet = net), (S.sideTxt = txt.join(" | ")), S.sideTxt && ((S.msg = S.sideTxt), UI.render(), await pause("bot")));
 }
@@ -278,6 +294,7 @@ function createSession(e) {
       bank: e.cash,
       startBank: e.cash,
       side: sideZero(),
+      sideLines: [],
       sideNet: 0,
       sideTxt: "",
       bet: e.minBet,
@@ -482,7 +499,10 @@ function settle() {
   const stake = S.cfg.side === "on" && S.side ? (S.side.bu || 0) * S.sel.length : 0;
   if (stake) {
     const r = busterPay(stake);
-    ((S.bank += r.credit), (S.sideNet = (S.sideNet || 0) + r.credit), (S.sideTxt = (S.sideTxt ? S.sideTxt + " | " : "") + r.txt));
+    ((S.bank += r.credit),
+      (S.sideNet = (S.sideNet || 0) + r.credit),
+      (S.sideTxt = (S.sideTxt ? S.sideTxt + " | " : "") + r.txt),
+      S.sideLines.push(r.line));
   }
   let s = S.sideNet || 0;
   for (const n of S.seats)
@@ -532,6 +552,7 @@ async function playRound() {
     (S.insNet = 0),
     (S.sideNet = 0),
     (S.sideTxt = ""),
+    (S.sideLines = []),
     (S.dealerBJ = !1),
     (S.msg = "Si distribuiscono le carte\u2026"));
   const e = S.bet,
@@ -866,6 +887,8 @@ function roomSnap(e) {
         insurance: e.insurance,
         sideTxt: e.sideTxt || "",
         sideNet: e.sideNet || 0,
+        sideLines: e.sideLines || [],
+        insNet: e.insNet || 0,
         spec: l,
       },
       ask: e.ask ? { id: e.ask.id, kind: e.ask.kind, opts: e.ask.opts } : null,
@@ -933,7 +956,11 @@ function roomSettle() {
     let n = s.left ? 0 : s.sideNet || 0;
     if (!s.left && s.sd && s.sd.bu) {
       const r = busterPay(s.sd.bu);
-      ((s.bank += r.credit), (n += r.credit), (s.sideNet = (s.sideNet || 0) + r.credit), (s.sideTxt = (s.sideTxt ? s.sideTxt + " | " : "") + r.txt));
+      ((s.bank += r.credit),
+        (n += r.credit),
+        (s.sideNet = (s.sideNet || 0) + r.credit),
+        (s.sideTxt = (s.sideTxt ? s.sideTxt + " | " : "") + r.txt),
+        (s.sideLines = (s.sideLines || []).concat([r.line])));
     }
     for (const o of s.hands) {
       const i = evalHand(o.cards),
@@ -970,7 +997,7 @@ async function roomRound(e) {
   ((S.phase = "dealing"), (S.turn = null), (S.dealerBJ = !1), (S.msg = "Si distribuiscono le carte\u2026"));
   for (const s of e) {
     const sd = S.cfg.side === "on" ? sideFit(s.sideReq, s.bet, 1, s.bank) : sideZero();
-    ((s.sd = sd), (s.sideNet = 0), (s.sideTxt = ""), (s.bank -= sideSum(sd)));
+    ((s.sd = sd), (s.sideNet = 0), (s.sideTxt = ""), (s.sideLines = []), (s.bank -= sideSum(sd)));
   }
   for (const s of e)
     ((s.bank -= s.bet),
@@ -989,7 +1016,7 @@ async function roomRound(e) {
     for (const s of e) {
       if (!sideSum(s.sd)) continue;
       const r = sideResolve("", s.hands[0].cards, a, s.sd);
-      ((s.bank += r.credit), (s.sideNet = r.net), (s.sideTxt = r.txt));
+      ((s.bank += r.credit), (s.sideNet = r.net), (s.sideTxt = r.txt), (s.sideLines = r.lines));
     }
     ((S.msg = "Side bet risolte."), UI.render(), await pause("bot"));
   }
@@ -1541,6 +1568,9 @@ function pkPost(e, t) {
     (e.stack -= t),
     (e.streetBet += t),
     (e.total += t),
+    (e.inv = e.inv || {}),
+    (e.inv[["flop", "turn", "river"].includes(PS.phase) ? PS.phase : "preflop"] =
+      (e.inv[["flop", "turn", "river"].includes(PS.phase) ? PS.phase : "preflop"] || 0) + t),
     e.stack === 0 && (e.allIn = !0),
     t
   );
@@ -1725,6 +1755,7 @@ async function pkHand(e) {
     ((c.hole = []),
       (c.streetBet = 0),
       (c.total = 0),
+      (c.inv = {}),
       (c.folded = !e.includes(c)),
       (c.allIn = !1),
       (c.acted = !1),
@@ -1865,6 +1896,9 @@ function pkSnap(e) {
       start: e.startStack,
       out: e.out,
       hole: a(e) && !e.folded ? e.hole.map(s) : [],
+      inv: a(e) ? e.inv || {} : {},
+      put: a(e) ? e.total : 0,
+      won: e.won || 0,
       folded: a(e) ? e.folded : !0,
     },
   };
@@ -4218,7 +4252,11 @@ function renderDock() {
         return `<div class="sbrow"><div><b>${name}</b><small>${desc}</small></div><div class="mini-stepper"><button type="button" data-act="side" data-k="${k}" data-d="-1" ${v > 0 ? "" : "disabled"} aria-label="Meno ${name}">\u2212</button><b>${money(v)}</b><button type="button" data-act="side" data-k="${k}" data-d="1" ${v < V.bet && (V.bet + sdT + sideStep(v, 1)) * n <= V.bank ? "" : "disabled"} aria-label="Pi\xF9 ${name}">+</button></div></div>`;
       },
       sdHtml = sdOn
-        ? `<div class="sidebets"><div class="sb-title">Side bet <small>facoltative${n > 1 ? " \xB7 per ogni posto" : ""}</small><button type="button" class="sb-help" data-act="side-help" aria-expanded="${sideHelpOpen}">${sideHelpOpen ? "Chiudi" : "Come funzionano?"}</button></div>${sideHelpOpen ? `<div class="sb-explain">${SIDE_HELP}</div>` : ""}${SIDE_DEF.map((d) => sdRow(d.k, d.name, d.desc)).join("")}${cfg.hint === "on" ? '<p class="sugline">Consiglio: le side bet rendono meno del gioco base e il conteggio Hi-Lo non le aiuta. Se vuoi allenarti a contare, lasciale a zero.</p>' : ""}</div>`
+        ? `<div class="sidebets"><div class="sb-title">Side bet <small>${sdT ? money(sdT) + (n > 1 ? " per posto" : "") + " puntati" : "facoltative"}</small><button type="button" class="sb-help" data-act="side-open" aria-expanded="${sideListOpen}">${sideListOpen ? "Chiudi" : sdT ? "Modifica" : "Scegli"}</button></div>${
+            sideListOpen
+              ? `<div class="sb-list"><button type="button" class="sb-help" data-act="side-help" aria-expanded="${sideHelpOpen}">${sideHelpOpen ? "Nascondi spiegazione" : "Come funzionano?"}</button>${sideHelpOpen ? `<div class="sb-explain">${SIDE_HELP}</div>` : ""}${SIDE_DEF.map((d) => sdRow(d.k, d.name, d.desc)).join("")}${cfg.hint === "on" ? '<p class="sugline">Consiglio: le side bet rendono meno del gioco base e il conteggio Hi-Lo non le aiuta. Se vuoi allenarti a contare, lasciale a zero.</p>' : ""}</div>`
+              : ""
+          }</div>`
         : "";
     s = `${cfg.hint === "on" ? `<p class="sugline">Consiglio: <b>${money(c)}</b> \u2014 true count ${fmtTC(l)}${l < 2 ? ": tieni la puntata minima" : ": il mazzo ti favorisce, puoi alzare"}.</p>` : ""}<div class="bet-row">${i}</div>${sdHtml}
     <div class="bet-tools">
@@ -4241,7 +4279,7 @@ function renderDock() {
       <button class="${o("split").trim()}" data-act="move" data-v="split" ${a.opts.split ? "" : "disabled"}>Dividi</button></div>`;
   } else
     a && a.kind === "next"
-      ? (s = '<button class="primary wide" data-act="next">Prossima mano</button>')
+      ? (s = roundSummary(V) + '<button class="primary wide" data-act="next">Prossima mano</button>')
       : a &&
         a.kind === "broke" &&
         (s = '<button class="primary wide" data-act="leave">Lascia il tavolo</button>');
@@ -4350,7 +4388,38 @@ const SIDE_HELP = `<p><b>Cosa sono.</b> Sono puntate extra, facoltative e separa
 <p><b>Match the Dealer.</b> Una delle tue prime due carte ha lo stesso valore di quella scoperta del dealer: 4 a 1, se anche il seme \xE8 uguale 9 a 1. Se lo hanno entrambe le carte i premi si sommano.</p>
 <p><b>Buster.</b> Scommetti che il dealer sballi. Pi\xF9 carte ha usato per sballare, pi\xF9 paga: 3 carte 2 a 1, 4 carte 4 a 1, 5 carte 9 a 1, 6 carte 20 a 1, 7 carte 50 a 1, 8 o pi\xF9 200 a 1.</p>
 <p><b>Conviene?</b> \xC8 fortuna pura, con vantaggio del banco pi\xF9 alto del blackjack, e il conteggio Hi-Lo non aiuta. Se ti alleni a contare, lasciale a zero.</p>`;
-let sideHelpOpen = !1;
+let sideHelpOpen = !1,
+  sideListOpen = !1;
+function roundSummary(v) {
+  const mine = v.seats.filter((x) => x.me),
+    multi = mine.length > 1,
+    RES = { win: "Vinta", lose: "Persa", push: "Pari", bj: "Blackjack" },
+    rows = [];
+  for (const m of mine)
+    m.hands.forEach((h, i) => {
+      const t = evalHand(h.cards.filter((c) => !c.down)).total;
+      rows.push({
+        l: `${multi ? "Posto " + m.pos + " \xB7 " : ""}Mano${m.hands.length > 1 ? " " + (i + 1) : ""}`,
+        d: `${t > 21 ? "sballato" : t} \xB7 puntata ${money(h.bet)}${h.doubled ? " (raddoppiata)" : ""}`,
+        r: RES[h.result] || "",
+        n: h.net,
+      });
+    });
+  const ins = v.me ? v.me.insNet : v.insNet,
+    lines = (v.me ? v.me.sideLines : v.sideLines) || [],
+    total = v.me ? v.me.roundNet : v.roundNet;
+  ins && rows.push({ l: "Assicurazione", d: "", r: ins > 0 ? "Vinta" : "Persa", n: ins });
+  for (const l of lines) rows.push({ l: l.name, d: l.txt, r: l.net > 0 ? "Vinta" : "Persa", n: l.net });
+  if (!rows.length) return "";
+  const cls = (n) => (n > 0 ? "win" : n < 0 ? "lose" : "push");
+  const tot = `<div class="rsrow tot"><b>Totale mano</b><span class="rs-${cls(total || 0)}">${money(total || 0, !0)}</span></div>`;
+  return `<div class="rsum"><div class="rsum-t">Cosa hai vinto e perso</div>${tot}${rows
+    .map(
+      (r) =>
+        `<div class="rsrow"><div><b>${esc(r.l)}</b><small>${esc(r.d)}</small></div><span class="rs-${cls(r.n)}">${r.r ? r.r + " " : ""}${money(r.n, !0)}</span></div>`,
+    )
+    .join("")}</div>`;
+}
 const sideOnV = (t) => t.cfg.side === !0 || t.cfg.side === "on",
   sideTotal = (t) => (sideOnV(t) && t.side ? sideSum(t.side) : 0),
   sideStep = (v, d) => (d > 0 ? (v < 10 ? 1 : 5) : v <= 10 ? 1 : 5);
@@ -4412,6 +4481,9 @@ function adjustBet(e) {
       break;
     case "bet":
       n && n.kind === "bet" && adjustBet(t.dataset.d);
+      break;
+    case "side-open":
+      ((sideListOpen = !sideListOpen), render());
       break;
     case "side-help":
       ((sideHelpOpen = !sideHelpOpen), render());
@@ -5464,10 +5536,19 @@ function pkRenderShowdown(e, hl) {
         .join("") +
       "</div>";
   }
-  const skip = !PK.room && e.phase === "showdown" ? '<button class="primary wide sdnext" data-act="pk-skip">Prossima mano</button>' : "";
+  const me = e.me,
+    STREET = { preflop: "Pre-flop", flop: "Flop", turn: "Turn", river: "River" },
+    inv = Object.keys(STREET).filter((k) => me.inv && me.inv[k] > 0),
+    net = (me.won || 0) - (me.put || 0),
+    bal = me.put > 0
+      ? `<div class="rsum"><div class="rsum-t">Il tuo bilancio della mano</div>${inv
+          .map((k) => `<div class="rsrow"><div><b>${STREET[k]}</b><small>puntato</small></div><span class="rs-lose">${money(-me.inv[k])}</span></div>`)
+          .join("")}<div class="rsrow"><div><b>Incassato</b><small>${me.won > 0 ? "piatto vinto" : "nessun piatto"}</small></div><span class="rs-${me.won > 0 ? "win" : "push"}">${money(me.won || 0, !0)}</span></div><div class="rsrow tot"><b>Totale mano</b><span class="rs-${net > 0 ? "win" : net < 0 ? "lose" : "push"}">${money(net, !0)}</span></div></div>`
+      : "",
+    skip = !PK.room && e.phase === "showdown" ? '<button class="primary wide sdnext" data-act="pk-skip">Prossima mano</button>' : "";
   ((el.hidden = !1),
     (el.className = "pk-sd" + (meWin ? " mine" : "")),
-    (el.innerHTML = `<div class="sdtitle">${meWin ? "Hai vinto la mano" : "Fine mano"}</div><div class="sdhead">${title}</div>${why}${rows}${skip}`));
+    (el.innerHTML = `<div class="sdtitle">${meWin ? "Hai vinto la mano" : "Fine mano"}</div><div class="sdhead">${title}</div>${why}${rows}${bal}${skip}`));
 }
 function pkScrollMe() {
   if (!PK || !PK.ask) return;
